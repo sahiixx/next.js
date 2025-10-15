@@ -882,5 +882,6 @@
   "881": "Invalid render stage: %s",
   "882": "The %s file \"./%s\" must export a function named \\`%s\\` or a default function.",
   "883": "The %s file \"%s\" must export a function named \\`%s\\` or a default function.",
-  "884": "Both %s file \"./%s\" and %s file \"./%s\" are detected. Please use \"./%s\" only."
+  "884": "Both %s file \"./%s\" and %s file \"./%s\" are detected. Please use \"./%s\" only.",
+  "885": "Received a underlying cookies object that does not match either `cookies` or `mutableCookies`"
 }
