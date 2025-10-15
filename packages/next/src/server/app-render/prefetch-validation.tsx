@@ -3,7 +3,7 @@ import type { LoaderTree } from '../lib/app-dir-module'
 import { parseLoaderTree } from '../../shared/lib/router/utils/parse-loader-tree'
 import type { AppSegmentConfig } from '../../build/segment-config/app/app-segment-config'
 
-export async function hasRuntimePrefetchInLoaderTree(
+export async function anySegmentHasRuntimePrefetchEnabled(
   tree: LoaderTree
 ): Promise<boolean> {
   const { mod: layoutOrPageMod } = await getLayoutOrPageModule(tree)
@@ -22,7 +22,7 @@ export async function hasRuntimePrefetchInLoaderTree(
   for (const parallelRouteKey in parallelRoutes) {
     const parallelRoute = parallelRoutes[parallelRouteKey]
     const hasChildRuntimePrefetch =
-      await hasRuntimePrefetchInLoaderTree(parallelRoute)
+      await anySegmentHasRuntimePrefetchEnabled(parallelRoute)
     if (hasChildRuntimePrefetch) {
       return true
     }

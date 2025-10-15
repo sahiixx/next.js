@@ -17,6 +17,7 @@ import {
 } from '../app-render/work-async-storage.external'
 import type {
   DevStoreModernPartial,
+  DevRequestStoreModern,
   PrerenderStoreModernRuntime,
   RequestStore,
 } from '../app-render/work-unit-async-storage.external'
@@ -213,7 +214,7 @@ import { createPromiseWithResolvers } from '../../shared/lib/promise-with-resolv
 import { ImageConfigContext } from '../../shared/lib/image-config-context.shared-runtime'
 import { imageConfigDefault } from '../../shared/lib/image-config'
 import { RenderStage, StagedRenderingController } from './staged-rendering'
-import { hasRuntimePrefetchInLoaderTree } from './prefetch-validation'
+import { anySegmentHasRuntimePrefetchEnabled } from './prefetch-validation'
 
 export type GetDynamicParamFromSegment = (
   // [slug] / [[slug]] / [...slug]
@@ -2706,6 +2707,7 @@ async function renderWithRestartOnCacheMissInDev(
 ) {
   const {
     renderOpts,
+    workStore,
     componentMod: {
       routeModule: {
         userland: { loaderTree },
@@ -2714,15 +2716,24 @@ async function renderWithRestartOnCacheMissInDev(
   } = ctx
   const { clientReferenceManifest, ComponentMod, setReactDebugChannel } =
     renderOpts
+  const captureOwnerStack = ComponentMod.captureOwnerStack
+
   assertClientReferenceManifest(clientReferenceManifest)
 
-  const hasRuntimePrefetch = await hasRuntimePrefetchInLoaderTree(loaderTree)
+  // Check if any segment of the current page has runtime prefetching enabled.
+  // Note that if we're in a client navigation, this config might come from
+  // a shared layout parent that won't actually be rendered here.
+  // However, if the parent is runtime prefetchable, then all of its children
+  // can potentially run as part of a runtime prefetch, so it makes sense to validate them.
+  const hasRuntimePrefetch =
+    await anySegmentHasRuntimePrefetchEnabled(loaderTree)
 
   // If the render is restarted, we'll recreate a fresh request store
   let requestStore: RequestStore = initialRequestStore
 
   const environmentName = () => {
-    const currentStage = requestStore.stagedRendering!.currentStage
+    const { stagedRendering } = requestStore as DevRequestStoreModern
+    const currentStage = stagedRendering.currentStage
     switch (currentStage) {
       case RenderStage.Static:
         return 'Prerender'
@@ -2736,6 +2747,25 @@ async function renderWithRestartOnCacheMissInDev(
       default:
         currentStage satisfies never
         throw new InvariantError(`Invalid render stage: ${currentStage}`)
+    }
+  }
+
+  const throwIfInvalidDynamic = (expectedStage: RenderStage) => {
+    const { stagedRendering, dynamicTracking } =
+      requestStore as DevRequestStoreModern
+    if (
+      expectedStage !== RenderStage.Dynamic &&
+      // Sync IO errors advance us to the dynamic stage.
+      stagedRendering.currentStage === RenderStage.Dynamic
+    ) {
+      // We should always have an error set, but be defensive
+      if (dynamicTracking.syncDynamicErrorWithStack) {
+        throw dynamicTracking.syncDynamicErrorWithStack
+      }
+    }
+
+    if (workStore.invalidDynamicUsageError) {
+      throw workStore.invalidDynamicUsageError
     }
   }
 
@@ -2773,6 +2803,10 @@ async function renderWithRestartOnCacheMissInDev(
     cacheSignal,
     hangingCacheAbortSignal: hangingCacheAbortController.signal,
     hangingPromiseAbortSignal: initialHangingPromiseController.signal,
+    dynamicTracking: createDynamicTrackingState(
+      false // isDebugDynamicAccesses
+    ),
+    captureOwnerStack,
   } satisfies DevStoreModernPartial)
 
   let debugChannel = setReactDebugChannel && createDebugChannel()
@@ -2813,6 +2847,8 @@ async function renderWithRestartOnCacheMissInDev(
           return stream
         },
         (stream) => {
+          throwIfInvalidDynamic(/* expected stage */ RenderStage.Static)
+
           // Runtime stage
 
           hadCacheMissInPreviousStages = cacheSignal.hasPendingReads()
@@ -2831,6 +2867,8 @@ async function renderWithRestartOnCacheMissInDev(
           return stream
         },
         (maybeStream) => {
+          throwIfInvalidDynamic(/* expected stage */ RenderStage.Runtime)
+
           // Dynamic stage
 
           // If the previous stage bailed out of the render due to a cache miss,
@@ -2881,6 +2919,10 @@ async function renderWithRestartOnCacheMissInDev(
 
   await cacheSignal.cacheReady()
   initialReactController.abort()
+  throwIfInvalidDynamic(
+    // If we're warming caches, we shouldn't have advanced past the runtime stage.
+    RenderStage.Runtime
+  )
 
   //===============================================
   // Final render (restarted)
@@ -2900,6 +2942,10 @@ async function renderWithRestartOnCacheMissInDev(
     stagedRendering: finalStageController,
     prerenderResumeDataCache: null,
     cacheSignal: null,
+    dynamicTracking: createDynamicTrackingState(
+      false // isDebugDynamicAccesses
+    ),
+    captureOwnerStack: ComponentMod.captureOwnerStack,
   } satisfies DevStoreModernPartial)
 
   // The initial render already wrote to its debug channel.
@@ -2923,11 +2969,15 @@ async function renderWithRestartOnCacheMissInDev(
         )
       },
       (stream) => {
+        throwIfInvalidDynamic(/* expected stage */ RenderStage.Static)
+
         // Runtime stage
         finalStageController.advanceStage(RenderStage.Runtime)
         return stream
       },
       (stream) => {
+        throwIfInvalidDynamic(/* expected stage */ RenderStage.Runtime)
+
         // Dynamic stage
         finalStageController.advanceStage(RenderStage.Dynamic)
         return stream

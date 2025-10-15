@@ -71,6 +71,7 @@ export type RequestStore = ProdRequestStore | DevRequestStore
 
 export type ProdRequestStore = BaseRequestStore & AllMissing<DevStore>
 export type DevRequestStore = BaseRequestStore & DevStore
+export type DevRequestStoreModern = BaseRequestStore & DevStoreModern
 
 // If `cacheComponents` is enabled, we add multiple extra properties on the store.
 // We either want all of them to be present, or all of them to be undefined.
@@ -89,6 +90,8 @@ type DevStoreCommon = {
 
 export type DevStoreModernPartial = {
   readonly stagedRendering: StagedRenderingController
+  readonly captureOwnerStack: () => string | null
+  readonly dynamicTracking: DynamicTrackingState
 } & (
   | {
       // In the initial render, we track and fill caches
