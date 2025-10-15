@@ -4304,6 +4304,7 @@ dependencies = [
  "next-custom-transforms",
  "next-taskless",
  "once_cell",
+ "pathdiff",
  "percent-encoding",
  "qstring",
  "react_remove_properties",
