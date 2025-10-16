@@ -29,7 +29,7 @@ export interface CommonWorkUnitStore {
   readonly implicitTags: ImplicitTags
 }
 
-export interface RequestStore extends CommonWorkUnitStore {
+interface BaseRequestStore extends CommonWorkUnitStore {
   readonly type: 'request'
 
   /**
@@ -65,26 +65,57 @@ export interface RequestStore extends CommonWorkUnitStore {
    * The resume data cache for this request. This will be a immutable cache.
    */
   renderResumeDataCache: RenderResumeDataCache | null
+}
 
-  // DEV-only
+export type RequestStore = ProdRequestStore | DevRequestStore
+
+export type ProdRequestStore = BaseRequestStore & AllMissing<DevStore>
+export type DevRequestStore = BaseRequestStore & DevStore
+
+// If `cacheComponents` is enabled, we add multiple extra properties on the store.
+// We either want all of them to be present, or all of them to be undefined.
+// Note that we don't want to remove the properties altogether, as in `{ a: A } | { a: A, b: B }`,
+// because then typescript wouldn prevent us from doing `if (requestStore.someProp) { ... }` --
+// we'd need to check `if ('someProp' in requestStore && requestStore.someProp) { ... }` instead,
+// which is annoying to write everywhere.
+type DevStore = DevStoreLegacy | DevStoreModern
+type DevStoreLegacy = DevStoreCommon & AllMissing<DevStoreModernPartial>
+type DevStoreModern = DevStoreCommon & DevStoreModernPartial
+
+type DevStoreCommon = {
   usedDynamic?: boolean
   devFallbackParams?: OpaqueFallbackRouteParams | null
-  stagedRendering?: StagedRenderingController | null
-  // Used in the cache warmup dev render (all of these should be present)
-  cacheSignal?: CacheSignal | null
-  prerenderResumeDataCache?: PrerenderResumeDataCache | null
-  /**
-   * Fired if we're not going to advance the render to the end (i.e. we remain in an earlier stage).
-   * This lets us end reads for caches that are waiting for a stage and would otherwise
-   * never finish their cache reads and thus block `cacheSignal.cacheReady()`.
-   * If it fires, it should always be before aborting the render or `hangingPromiseAbortSignal`.
-   * */
-  hangingCacheAbortSignal?: AbortSignal | null
-  /**
-   * Fired after a render has been aborted to reject hanging promises.
-   * Analogous to `PrerenderStoreModern.renderSignal`.
-   */
-  hangingPromiseAbortSignal?: AbortSignal | null
+}
+
+export type DevStoreModernPartial = {
+  readonly stagedRendering: StagedRenderingController
+} & (
+  | {
+      // In the initial render, we track and fill caches
+      readonly cacheSignal: CacheSignal
+      readonly prerenderResumeDataCache: PrerenderResumeDataCache
+      /**
+       * Fired if we're not going to advance the render to the end (i.e. we remain in an earlier stage).
+       * This lets us end reads for caches that are waiting for a stage and would otherwise
+       * never finish their cache reads and thus block `cacheSignal.cacheReady()`.
+       * If it fires, it should always be before aborting the render or `hangingPromiseAbortSignal`.
+       * */
+      hangingCacheAbortSignal: AbortSignal
+      /**
+       * Fired after a render has been aborted to reject hanging promises.
+       * Analogous to `PrerenderStoreModern.renderSignal`.
+       */
+      hangingPromiseAbortSignal: AbortSignal
+    }
+  | {
+      // In the final (restarted) render, we do not track or fill caches
+      readonly cacheSignal: null
+      readonly prerenderResumeDataCache: null
+    }
+)
+
+type AllMissing<TObj extends Record<string, any>> = {
+  [key in keyof TObj]?: undefined
 }
 
 /**

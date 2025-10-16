@@ -17,6 +17,7 @@ import { prerender } from 'react-server-dom-webpack/static'
 import type { WorkStore } from '../app-render/work-async-storage.external'
 import { workAsyncStorage } from '../app-render/work-async-storage.external'
 import type {
+  DevRequestStore,
   PrerenderStoreModernClient,
   PrerenderStoreModernRuntime,
   PrivateUseCacheStore,
@@ -1865,7 +1866,7 @@ function isRecentlyRevalidatedTag(tag: string, workStore: WorkStore): boolean {
 
 async function delayBeforeCacheReadStartInDev(
   stage: NonStaticRenderStage,
-  requestStore: RequestStore
+  requestStore: DevRequestStore
 ): Promise<void> {
   const { stagedRendering } = requestStore
   if (stagedRendering && stagedRendering.currentStage < stage) {
@@ -1875,22 +1876,19 @@ async function delayBeforeCacheReadStartInDev(
 
 async function delayOrHangStartedCacheReadInDev(
   stage: NonStaticRenderStage,
-  requestStore: RequestStore,
+  requestStore: DevRequestStore,
   cacheSignal: CacheSignal | null,
   route: string,
   expression: string
 ): Promise<{ hangingPromise: Promise<never> } | null> {
-  const {
-    stagedRendering,
-    hangingCacheAbortSignal,
-    hangingPromiseAbortSignal,
-  } = requestStore
+  const { stagedRendering } = requestStore
   if (!stagedRendering || stagedRendering.currentStage >= stage) {
     // No hanging or delaying necessary.
     return null
   }
 
-  if (hangingPromiseAbortSignal && hangingCacheAbortSignal && cacheSignal) {
+  if (requestStore.cacheSignal && cacheSignal) {
+    const { hangingCacheAbortSignal, hangingPromiseAbortSignal } = requestStore
     // We're filling caches, and might need to omit this one if we can't reach its target stage.
     const shouldHang =
       // If we already aborted before the target stage, we should hang.

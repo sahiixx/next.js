@@ -16,6 +16,7 @@ import {
   type WorkStore,
 } from '../app-render/work-async-storage.external'
 import type {
+  DevStoreModernPartial,
   PrerenderStoreModernRuntime,
   RequestStore,
 } from '../app-render/work-unit-async-storage.external'
@@ -2763,15 +2764,16 @@ async function renderWithRestartOnCacheMissInDev(
     initialHangingPromiseController.signal
   )
 
-  requestStore.prerenderResumeDataCache = prerenderResumeDataCache
   // `getRenderResumeDataCache` will fall back to using `prerenderResumeDataCache` as `renderResumeDataCache`,
   // so not having a resume data cache won't break any expectations in case we don't need to restart.
   requestStore.renderResumeDataCache = null
-  requestStore.stagedRendering = initialStageController
-  requestStore.cacheSignal = cacheSignal
-  requestStore.hangingCacheAbortSignal = hangingCacheAbortController.signal
-  requestStore.hangingPromiseAbortSignal =
-    initialHangingPromiseController.signal
+  Object.assign(requestStore, {
+    stagedRendering: initialStageController,
+    prerenderResumeDataCache,
+    cacheSignal,
+    hangingCacheAbortSignal: hangingCacheAbortController.signal,
+    hangingPromiseAbortSignal: initialHangingPromiseController.signal,
+  } satisfies DevStoreModernPartial)
 
   let debugChannel = setReactDebugChannel && createDebugChannel()
 
@@ -2891,12 +2893,14 @@ async function renderWithRestartOnCacheMissInDev(
 
   // We've filled the caches, so now we can render as usual,
   // without any cache-filling mechanics.
-  requestStore.prerenderResumeDataCache = null
   requestStore.renderResumeDataCache = createRenderResumeDataCache(
     prerenderResumeDataCache
   )
-  requestStore.stagedRendering = finalStageController
-  requestStore.cacheSignal = null
+  Object.assign(requestStore, {
+    stagedRendering: finalStageController,
+    prerenderResumeDataCache: null,
+    cacheSignal: null,
+  } satisfies DevStoreModernPartial)
 
   // The initial render already wrote to its debug channel.
   // We're not using it, so we need to create a new one.
