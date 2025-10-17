@@ -2748,6 +2748,7 @@ async function renderWithRestartOnCacheMissInDev(
   // This render might end up being used as a prospective render (if there's cache misses),
   // so we need to set it up for filling caches.
   const cacheSignal = new CacheSignal()
+  const hangingCacheAbortController = new AbortController()
 
   // If we encounter async modules that delay rendering, we'll also need to restart.
   // TODO(restart-on-cache-miss): technically, we only need to wait for pending *server* modules here,
@@ -2757,9 +2758,9 @@ async function renderWithRestartOnCacheMissInDev(
   const prerenderResumeDataCache = createPrerenderResumeDataCache()
 
   const initialReactController = new AbortController()
-  const initialDataController = new AbortController() // Controls hanging promises we create
+  const initialHangingPromiseController = new AbortController()
   const initialStageController = new StagedRenderingController(
-    initialDataController.signal
+    initialHangingPromiseController.signal
   )
 
   requestStore.prerenderResumeDataCache = prerenderResumeDataCache
@@ -2768,6 +2769,9 @@ async function renderWithRestartOnCacheMissInDev(
   requestStore.renderResumeDataCache = null
   requestStore.stagedRendering = initialStageController
   requestStore.cacheSignal = cacheSignal
+  requestStore.hangingCacheAbortSignal = hangingCacheAbortController.signal
+  requestStore.hangingPromiseAbortSignal =
+    initialHangingPromiseController.signal
 
   let debugChannel = setReactDebugChannel && createDebugChannel()
 
@@ -2795,7 +2799,14 @@ async function renderWithRestartOnCacheMissInDev(
           // Note that we want to install this listener after the render is started
           // so that it runs after react is finished running its abort code.
           initialReactController.signal.addEventListener('abort', () => {
-            initialDataController.abort(initialReactController.signal.reason)
+            const { reason } = initialReactController.signal
+            initialHangingPromiseController.abort(reason)
+
+            // We likely aborted hanging caches already (before waiting for cacheReady()),
+            // But if we haven't, we might as well settle the promises that are waiting for this signal.
+            if (!hangingCacheAbortController.signal.aborted) {
+              hangingCacheAbortController.abort(reason)
+            }
           })
           return stream
         },
@@ -2858,7 +2869,14 @@ async function renderWithRestartOnCacheMissInDev(
   // Cache miss. We will use the initial render to fill caches, and discard its result.
   // Then, we can render again with warm caches.
 
-  // TODO: potential deadlock if we started reads for caches delayed until runtime/dynamic
+  // Signal to caches that are still blocked on some stage that we're not reaching it
+  // and the cache reads should end. This avoids a deadlock where reads have started
+  // but never end because a cache is waiting for us to reach a certain stage
+  if (initialStageController.currentStage !== RenderStage.Dynamic) {
+    // TODO(restart-on-cache-miss): What if we got advanced to dynamic because of sync IO?
+    hangingCacheAbortController.abort()
+  }
+
   await cacheSignal.cacheReady()
   initialReactController.abort()
 

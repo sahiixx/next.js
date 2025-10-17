@@ -37,10 +37,7 @@ import {
   getRuntimeStagePromise,
 } from '../app-render/work-unit-async-storage.external'
 
-import {
-  makeDevtoolsIOAwarePromise,
-  makeHangingPromise,
-} from '../dynamic-rendering-utils'
+import { makeHangingPromise } from '../dynamic-rendering-utils'
 
 import type { ClientReferenceManifestForRsc } from '../../build/webpack/plugins/flight-manifest-plugin'
 
@@ -71,7 +68,10 @@ import { createLazyResult, isResolvedLazyResult } from '../lib/lazy-result'
 import { dynamicAccessAsyncStorage } from '../app-render/dynamic-access-async-storage.external'
 import { isReactLargeShellError } from '../app-render/react-large-shell-error'
 import type { CacheLife } from './cache-life'
-import { RenderStage } from '../app-render/staged-rendering'
+import {
+  RenderStage,
+  type NonStaticRenderStage,
+} from '../app-render/staged-rendering'
 
 interface PrivateCacheContext {
   readonly kind: 'private'
@@ -1015,10 +1015,9 @@ export function cache(
             if (process.env.NODE_ENV === 'development') {
               // Similar to runtime prerenders, private caches should not resolve in the static stage
               // of a dev request, so we delay them.
-              await makeDevtoolsIOAwarePromise(
-                undefined,
-                outerWorkUnitStore,
-                RenderStage.Runtime
+              await delayBeforeCacheReadStartInDev(
+                RenderStage.Runtime,
+                outerWorkUnitStore
               )
             }
             break
@@ -1283,11 +1282,16 @@ export function cache(
                     // TODO(restart-on-cache-miss): Optimize this to avoid unnecessary restarts.
                     // We don't end the cache read here, so this will always appear as a cache miss in the static stage,
                     // and thus will cause a restart even if all caches are filled.
-                    await makeDevtoolsIOAwarePromise(
-                      undefined,
+                    const hang = await delayOrHangStartedCacheReadInDev(
+                      RenderStage.Runtime,
                       workUnitStore,
-                      RenderStage.Runtime
+                      cacheSignal,
+                      workStore.route,
+                      'dynamic "use cache"'
                     )
+                    if (hang) {
+                      return hang.hangingPromise
+                    }
                   }
                   break
                 }
@@ -1325,11 +1329,16 @@ export function cache(
                     // TODO(restart-on-cache-miss): Optimize this to avoid unnecessary restarts.
                     // We don't end the cache read here, so this will always appear as a cache miss in the runtime stage,
                     // and thus will cause a restart even if all caches are filled.
-                    await makeDevtoolsIOAwarePromise(
-                      undefined,
+                    const hang = await delayOrHangStartedCacheReadInDev(
+                      RenderStage.Dynamic,
                       workUnitStore,
-                      RenderStage.Dynamic
+                      cacheSignal,
+                      workStore.route,
+                      'dynamic "use cache"'
                     )
+                    if (hang) {
+                      return hang.hangingPromise
+                    }
                   }
                   break
                 }
@@ -1499,11 +1508,16 @@ export function cache(
                 // TODO(restart-on-cache-miss): Optimize this to avoid unnecessary restarts.
                 // We don't end the cache read here, so this will always appear as a cache miss in the static stage,
                 // and thus will cause a restart even if all caches are filled.
-                await makeDevtoolsIOAwarePromise(
-                  undefined,
+                const hang = await delayOrHangStartedCacheReadInDev(
+                  RenderStage.Dynamic,
                   workUnitStore,
-                  RenderStage.Runtime
+                  cacheSignal,
+                  workStore.route,
+                  'dynamic "use cache"'
                 )
+                if (hang) {
+                  return hang.hangingPromise
+                }
               }
               break
             }
@@ -1847,4 +1861,79 @@ function isRecentlyRevalidatedTag(tag: string, workStore: WorkStore): boolean {
   }
 
   return false
+}
+
+async function delayBeforeCacheReadStartInDev(
+  stage: NonStaticRenderStage,
+  requestStore: RequestStore
+): Promise<void> {
+  const { stagedRendering } = requestStore
+  if (stagedRendering && stagedRendering.currentStage < stage) {
+    await stagedRendering.waitForStage(stage)
+  }
+}
+
+async function delayOrHangStartedCacheReadInDev(
+  stage: NonStaticRenderStage,
+  requestStore: RequestStore,
+  cacheSignal: CacheSignal | null,
+  route: string,
+  expression: string
+): Promise<{ hangingPromise: Promise<never> } | null> {
+  const {
+    stagedRendering,
+    hangingCacheAbortSignal,
+    hangingPromiseAbortSignal,
+  } = requestStore
+  if (!stagedRendering || stagedRendering.currentStage >= stage) {
+    // No hanging or delaying necessary.
+    return null
+  }
+
+  if (hangingPromiseAbortSignal && hangingCacheAbortSignal && cacheSignal) {
+    // We're filling caches, and might need to omit this one if we can't reach its target stage.
+    const shouldHang =
+      // If we already aborted before the target stage, we should hang.
+      (hangingCacheAbortSignal.aborted &&
+        stagedRendering.currentStage < stage) ||
+      // If We haven't reached the target stage yet OR aborted, wait.
+      (await Promise.race([
+        // Resolves first if we reach the target stage (= should not hang)
+        stagedRendering.delayUntilStage(stage, false),
+        // Resolves first if we won't reach the target stage (= should hang)
+        new Promise<boolean>((resolve) => {
+          hangingCacheAbortSignal.addEventListener(
+            'abort',
+            () => resolve(true),
+            { once: true }
+          )
+        }),
+      ]))
+
+    if (!shouldHang) {
+      // We've reached the target stage, so we can unblock this cache.
+      return null
+    }
+
+    // The hanging cache signal was aborted.
+    // This means that we'll never reach the stage where this cache should resolve.
+    // But we're still waiting for *other* caches to finish,
+    // so need to end the cache read to avoid blocking `cacheReady()`
+    // on something that's supposed to hang "forever".
+    cacheSignal.endRead()
+
+    // Now, we hang until after the render is aborted (i.e. after `cacheReady()` resolves)
+    const hangingPromise = makeHangingPromise<never>(
+      hangingPromiseAbortSignal,
+      route,
+      expression
+    )
+    // Wrapped in an object so that it's not automatically awaited before returning.
+    return { hangingPromise }
+  }
+
+  // Otherwise, we're in the restarted render, after caches have been filled.
+  // This render should finish completely, without aborting, so we should only delay.
+  await stagedRendering.waitForStage(stage)
+  return null
 }

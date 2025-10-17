@@ -52,23 +52,27 @@ export class StagedRenderingController {
     }
   }
 
-  delayUntilStage<T>(stage: NonStaticRenderStage, resolvedValue: T) {
-    let stagePromise: Promise<void>
+  private getStagePromise(stage: NonStaticRenderStage): Promise<void> {
     switch (stage) {
       case RenderStage.Runtime: {
-        stagePromise = this.runtimeStagePromise.promise
-        break
+        return this.runtimeStagePromise.promise
       }
       case RenderStage.Dynamic: {
-        stagePromise = this.dynamicStagePromise.promise
-        break
+        return this.dynamicStagePromise.promise
       }
       default: {
         stage satisfies never
         throw new InvariantError(`Invalid render stage: ${stage}`)
       }
     }
+  }
 
+  waitForStage(stage: NonStaticRenderStage) {
+    return this.getStagePromise(stage)
+  }
+
+  delayUntilStage<T>(stage: NonStaticRenderStage, resolvedValue: T) {
+    const stagePromise = this.getStagePromise(stage)
     // FIXME: this seems to be the only form that leads to correct API names
     // being displayed in React Devtools (in the "suspended by" section).
     // If we use `promise.then(() => resolvedValue)`, the names are lost.

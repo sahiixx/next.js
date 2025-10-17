@@ -70,8 +70,21 @@ export interface RequestStore extends CommonWorkUnitStore {
   usedDynamic?: boolean
   devFallbackParams?: OpaqueFallbackRouteParams | null
   stagedRendering?: StagedRenderingController | null
+  // Used in the cache warmup dev render (all of these should be present)
   cacheSignal?: CacheSignal | null
   prerenderResumeDataCache?: PrerenderResumeDataCache | null
+  /**
+   * Fired if we're not going to advance the render to the end (i.e. we remain in an earlier stage).
+   * This lets us end reads for caches that are waiting for a stage and would otherwise
+   * never finish their cache reads and thus block `cacheSignal.cacheReady()`.
+   * If it fires, it should always be before aborting the render or `hangingPromiseAbortSignal`.
+   * */
+  hangingCacheAbortSignal?: AbortSignal | null
+  /**
+   * Fired after a render has been aborted to reject hanging promises.
+   * Analogous to `PrerenderStoreModern.renderSignal`.
+   */
+  hangingPromiseAbortSignal?: AbortSignal | null
 }
 
 /**
