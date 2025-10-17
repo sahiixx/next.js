@@ -454,9 +454,20 @@ function makeUntrackedSearchParamsWithDevWarnings(
     requestStore,
     RenderStage.Runtime
   )
-  promise.then(() => {
-    promiseInitialized = true
-  })
+  promise.then(
+    () => {
+      promiseInitialized = true
+    },
+    // If we're in staged rendering, this promise will reject if the render
+    // is aborted before it can reach the runtime stage.
+    // In that case, we have to prevent an unhandled rejection from the promise
+    // created by this `.then()` call.
+    // This does not affect the `promiseInitialized` logic above,
+    // because `proxiedUnderlying` will not be used to resolve the promise,
+    // so there's no risk of any of its properties being accessed and triggering
+    // an undesireable warning.
+    ignoreReject
+  )
 
   Object.keys(underlyingSearchParams).forEach((prop) => {
     if (wellKnownProperties.has(prop)) {
@@ -524,6 +535,8 @@ function makeUntrackedSearchParamsWithDevWarnings(
   CachedSearchParams.set(requestStore, proxiedPromise)
   return proxiedPromise
 }
+
+function ignoreReject() {}
 
 const warnForSyncAccess = createDedupedByCallsiteServerErrorLoggerDev(
   createSearchAccessError
