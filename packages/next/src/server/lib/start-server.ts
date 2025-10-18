@@ -364,21 +364,29 @@ export async function startServer(
         process.env.__NEXT_EXPERIMENTAL_HTTPS = '1'
       }
 
-      // Only load env and config in dev to for logging purposes
+      // Load env and config for logging purposes
       let envInfo: string[] | undefined
       let experimentalFeatures: ConfiguredExperimentalFeature[] | undefined
+      let cacheComponents: boolean | undefined
       try {
-        if (isDev) {
-          const startServerInfo = await getStartServerInfo({ dir, dev: isDev })
-          envInfo = startServerInfo.envInfo
-          experimentalFeatures = startServerInfo.experimentalFeatures
-        }
+        const startServerInfo = await getStartServerInfo({
+          dir,
+          dev: isDev,
+          loadEnv: isDev,
+        })
+        envInfo = isDev ? startServerInfo.envInfo : undefined
+        experimentalFeatures = isDev
+          ? startServerInfo.experimentalFeatures
+          : undefined
+        cacheComponents = startServerInfo.cacheComponents
+
         logStartInfo({
           networkUrl,
           appUrl,
           envInfo,
           experimentalFeatures,
           logBundler: isDev,
+          cacheComponents,
         })
 
         Log.event(`Starting...`)

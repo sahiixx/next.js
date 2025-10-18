@@ -1115,11 +1115,13 @@ export default async function build(
       )
 
       // Always log next version first then start rest jobs
-      const { envInfo, experimentalFeatures } = await getStartServerInfo({
-        dir,
-        dev: false,
-        debugPrerender,
-      })
+      const { envInfo, experimentalFeatures, cacheComponents } =
+        await getStartServerInfo({
+          dir,
+          dev: false,
+          debugPrerender,
+          loadEnv: true,
+        })
 
       logStartInfo({
         networkUrl: null,
@@ -1127,6 +1129,7 @@ export default async function build(
         envInfo,
         experimentalFeatures,
         logBundler: true,
+        cacheComponents,
       })
 
       const typeCheckingOptions: Parameters<typeof startTypeChecking>[0] = {
