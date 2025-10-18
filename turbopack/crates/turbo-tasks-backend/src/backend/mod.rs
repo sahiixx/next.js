@@ -730,7 +730,7 @@ impl<B: BackingStorage> TurboTasksBackendInner<B> {
                 )
                 .entered();
                 let _ = task.add(CachedDataItem::OutputDependent {
-                    task: reader,
+                    task: reader.unwrap(),
                     value: (),
                 });
                 drop(task);
