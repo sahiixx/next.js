@@ -1569,7 +1569,11 @@ export default async function build(
                   undefined
                 )
               )
-            } else if (!isReservedPage(route)) {
+            } else if (
+              !isReservedPage(route) ||
+              // don't consider /api reserved here
+              route.match(/^\/(api(\/|$))/)
+            ) {
               staticRoutes.push(pageToRoute(route))
             }
           }
@@ -3156,7 +3160,7 @@ export default async function build(
               ...(isRoutePPREnabled
                 ? [
                     {
-                      type: 'header',
+                      type: 'header' as const,
                       key: 'user-agent',
                       value: htmlBotsRegexString,
                     },
@@ -4152,8 +4156,10 @@ export default async function build(
               dir,
               distDir,
               config,
+              buildId,
               configOutDir: path.join(dir, configOutDir),
               staticPages,
+              serverPropsPages,
               nextVersion: process.env.__NEXT_VERSION as string,
               tracingRoot: outputFileTracingRoot,
               hasNodeMiddleware,
@@ -4166,6 +4172,7 @@ export default async function build(
               middlewareManifest,
               functionsConfigManifest,
               hasStatic404: useStaticPages404,
+              hasStatic500: useDefaultStatic500,
               requiredServerFiles: requiredServerFilesManifest.files,
             })
           })

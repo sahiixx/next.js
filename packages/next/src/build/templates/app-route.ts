@@ -264,6 +264,9 @@ export async function handler(
         }
       })
     }
+    const isMinimalMode = Boolean(
+      process.env.MINIMAL_MODE || getRequestMeta(req, 'minimalMode')
+    )
 
     const handleResponse = async (currentSpan?: Span) => {
       const responseGenerator: ResponseGenerator = async ({
@@ -271,7 +274,7 @@ export async function handler(
       }) => {
         try {
           if (
-            !getRequestMeta(req, 'minimalMode') &&
+            !isMinimalMode &&
             isOnDemandRevalidate &&
             revalidateOnlyGenerated &&
             !previousCacheEntry
@@ -383,6 +386,7 @@ export async function handler(
         revalidateOnlyGenerated,
         responseGenerator,
         waitUntil: ctx.waitUntil,
+        isMinimalMode,
       })
 
       // we don't create a cacheEntry for ISR
@@ -396,7 +400,7 @@ export async function handler(
         )
       }
 
-      if (!getRequestMeta(req, 'minimalMode')) {
+      if (!isMinimalMode) {
         res.setHeader(
           'x-nextjs-cache',
           isOnDemandRevalidate
@@ -419,7 +423,7 @@ export async function handler(
 
       const headers = fromNodeOutgoingHttpHeaders(cacheEntry.value.headers)
 
-      if (!(getRequestMeta(req, 'minimalMode') && isIsr)) {
+      if (!(isMinimalMode && isIsr)) {
         headers.delete(NEXT_CACHE_TAGS_HEADER)
       }
 

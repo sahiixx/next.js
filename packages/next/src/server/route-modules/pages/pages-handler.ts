@@ -94,6 +94,19 @@ export const getHandler = ({
       return
     }
 
+    const isMinimalMode = Boolean(
+      process.env.MINIMAL_MODE || getRequestMeta(req, 'minimalMode')
+    )
+
+    const render404 = async () => {
+      // TODO: should route-module itself handle rendering the 404
+      if (routerServerContext?.render404) {
+        await routerServerContext.render404(req, res, parsedUrl, false)
+      } else {
+        res.end('This page could not be found')
+      }
+    }
+
     const {
       buildId,
       query,
@@ -166,6 +179,9 @@ export const getHandler = ({
 
       if (prerenderInfo) {
         if (prerenderInfo.fallback === false && !isPrerendered) {
+          if (isMinimalMode) {
+            return await render404()
+          }
           throw new NoFallbackError()
         }
 
@@ -184,7 +200,7 @@ export const getHandler = ({
     // to the bot in the head.
     if (
       (isIsrFallback && isBot(req.headers['user-agent'] || '')) ||
-      getRequestMeta(req, 'minimalMode')
+      isMinimalMode
     ) {
       isIsrFallback = false
     }
@@ -447,7 +463,8 @@ export const getHandler = ({
                   incrementalCache: await routeModule.getIncrementalCache(
                     req,
                     nextConfig,
-                    prerenderManifest
+                    prerenderManifest,
+                    isMinimalMode
                   ),
                   waitUntil: ctx.waitUntil,
                 }
@@ -462,7 +479,7 @@ export const getHandler = ({
           }
 
           if (
-            !getRequestMeta(req, 'minimalMode') &&
+            !isMinimalMode &&
             isOnDemandRevalidate &&
             revalidateOnlyGenerated &&
             !previousCacheEntry
@@ -511,6 +528,7 @@ export const getHandler = ({
           waitUntil: ctx.waitUntil,
           responseGenerator: responseGenerator,
           prerenderManifest,
+          isMinimalMode,
         })
 
         // if we got a cache hit this wasn't an ISR fallback
@@ -525,7 +543,7 @@ export const getHandler = ({
           return
         }
 
-        if (hasStaticProps && !getRequestMeta(req, 'minimalMode')) {
+        if (hasStaticProps && !isMinimalMode) {
           res.setHeader(
             'x-nextjs-cache',
             isOnDemandRevalidate
@@ -602,13 +620,7 @@ export const getHandler = ({
             res.end('{"notFound":true}')
             return
           }
-          // TODO: should route-module itself handle rendering the 404
-          if (routerServerContext?.render404) {
-            await routerServerContext.render404(req, res, parsedUrl, false)
-          } else {
-            res.end('This page could not be found')
-          }
-          return
+          return await render404()
         }
 
         if (result.value.kind === CachedRouteKind.REDIRECT) {
@@ -675,9 +687,7 @@ export const getHandler = ({
         // send the _error response
         if (
           getRequestMeta(req, 'customErrorRender') ||
-          (isErrorPage &&
-            getRequestMeta(req, 'minimalMode') &&
-            res.statusCode === 500)
+          (isErrorPage && isMinimalMode && res.statusCode === 500)
         ) {
           return null
         }
@@ -724,22 +734,26 @@ export const getHandler = ({
         )
       }
     } catch (err) {
-      if (!(err instanceof NoFallbackError)) {
-        await routeModule.onRequestError(
-          req,
-          err,
-          {
-            routerKind: 'Pages Router',
-            routePath: srcPage,
-            routeType: 'render',
-            revalidateReason: getRevalidateReason({
-              isStaticGeneration: hasStaticProps,
-              isOnDemandRevalidate,
-            }),
-          },
-          routerServerContext
-        )
+      if (err instanceof NoFallbackError) {
+        if (isMinimalMode) {
+          return await render404()
+        }
       }
+
+      await routeModule.onRequestError(
+        req,
+        err,
+        {
+          routerKind: 'Pages Router',
+          routePath: srcPage,
+          routeType: 'render',
+          revalidateReason: getRevalidateReason({
+            isStaticGeneration: hasStaticProps,
+            isOnDemandRevalidate,
+          }),
+        },
+        routerServerContext
+      )
 
       // rethrow so that we can handle serving error page
       throw err
