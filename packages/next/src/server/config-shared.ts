@@ -1524,6 +1524,7 @@ export const defaultConfig = Object.freeze({
     isolatedDevBuild: true,
     proxyClientMaxBodySize: 10_485_760, // 10MB
     hideLogsAfterAbort: false,
+    mcpServer: true,
   },
   htmlLimitedBots: undefined,
   bundlePagesRouterDependencies: false,
